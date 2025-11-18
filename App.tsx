@@ -12,6 +12,7 @@ import React, { useState, useCallback, useRef } from 'react';
 import { Dropzone } from './components/Dropzone';
 import { LogConsole } from './components/LogConsole';
 import { Button } from './components/Button';
+import { Tutorial } from './components/Tutorial';
 import { DownloadIcon, RocketIcon, RicLogoIcon } from './components/icons';
 import { transformData } from './services/transformer';
 import type { ValidationResult, OutputData } from './services/transformer';
@@ -127,6 +128,8 @@ const App = () => {
                         This tool processes land acquisition Excel files locally in your browser. Your data is secure and never uploaded to a server.
                     </p>
                 </header>
+
+                <Tutorial />
 
                 <main className="space-y-8">
                     <div className="bg-slate-900/70 p-6 rounded-2xl shadow-lg border border-slate-700">

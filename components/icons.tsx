@@ -43,6 +43,18 @@ export const InfoIcon = (props: React.SVGProps<SVGSVGElement>) => (
     </svg>
 );
 
+export const BookOpenIcon = (props: React.SVGProps<SVGSVGElement>) => (
+  <svg {...props} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+    <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
+  </svg>
+);
+
+export const ChevronDownIcon = (props: React.SVGProps<SVGSVGElement>) => (
+    <svg {...props} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" >
+        <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+    </svg>
+);
+
 export const RicLogoIcon = (props: React.SVGProps<SVGSVGElement>) => (
     <svg {...props} viewBox="0 0 512 512" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
         <path d="M106.667 42.6667C75.4733 42.6667 50.1333 68.0067 50.1333 99.2C50.1333 130.393 75.4733 155.733 106.667 155.733C137.86 155.733 163.2 130.393 163.2 99.2C163.2 68.0067 137.86 42.6667 106.667 42.6667Z" />
