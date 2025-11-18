@@ -1,0 +1,5 @@
+{
+  "name": "Land Data Transformer",
+  "description": "A browser-based tool to transform land acquisition Excel files. This application replicates the functionality of a Python script to process an input file and a results file, generating three distinct output files for different stages of data processing, all without server-side interaction.",
+  "requestFramePermissions": []
+}
