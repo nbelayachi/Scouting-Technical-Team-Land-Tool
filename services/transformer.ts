@@ -17,7 +17,8 @@ const cleanOwnerName = (name: any): string => {
     if (name === null || typeof name === 'undefined' || typeof name !== 'string') {
         return '';
     }
-    const cleanedName = name.split(/\s+nato(?:\/a)?\s+a\s+/i)[0];
+    // Updated regex to handle 'nato a', 'nata a' and 'nato/a a'
+    const cleanedName = name.split(/\s+nat[oa](?:\/a)?\s+a\s+/i)[0];
     return cleanedName.trim();
 };
 
@@ -48,14 +49,15 @@ const readFileSheets = (file: File): Promise<{ [sheetName: string]: any[] }> => 
 
 const validateInputFile = (jsonData: { [sheetName: string]: any[] }): ValidationResult => {
     const errors: string[] = [];
-    if (!jsonData['Hoja1']) {
-        errors.push("Input file is missing required sheet: 'Hoja1'.");
+    if (!jsonData['Hoja1'] && !jsonData['Sheet1']) {
+        errors.push("Input file is missing required sheet: 'Hoja1' or 'Sheet1'.");
     } else {
+        const sheet = jsonData['Hoja1'] || jsonData['Sheet1'];
         const requiredCols = ['provincia', 'comune', 'foglio', 'particella', 'Area', 'Sezione', 'CP', 'Parcel_ID'];
-        const firstRow = jsonData['Hoja1'][0] || {};
+        const firstRow = sheet[0] || {};
         const missingCols = requiredCols.filter(col => !(col in firstRow));
         if (missingCols.length > 0) {
-            errors.push(`Input file ('Hoja1') is missing columns: ${missingCols.join(', ')}.`);
+            errors.push(`Input file is missing columns: ${missingCols.join(', ')}.`);
         }
     }
     return { isValid: errors.length === 0, errors };
@@ -97,9 +99,11 @@ const validateResultsFile = (jsonData: { [sheetName: string]: any[] }): Validati
 // --- Core Transformation Logic ---
 const runProcess = (inputData: any, resultsData: any, log: LogFunction): OutputData => {
 
+    const inputSheet = inputData['Hoja1'] || inputData['Sheet1'];
+
     // --- 1. PREPARE BASE DF (from Input file) ---
     log("Preparing base data (Carga 1)...");
-    let df_base = [...inputData['Hoja1']];
+    let df_base = [...inputSheet];
     df_base = df_base.filter(row => row['Parcel_ID'] != null && row['Parcel_ID'] !== '');
 
     df_base.forEach(row => {
@@ -135,8 +139,8 @@ const runProcess = (inputData: any, resultsData: any, log: LogFunction): OutputD
             }
         });
 
-    // 2b/2c. Group owners, create JSON, and count owners
-    log("Aggregating owner data into JSON...");
+    // 2b/2c. Group owners, create simple string, and count owners
+    log("Aggregating owner data into simple string...");
     const df_owners_clean = resultsData['Owners_Normalized'].filter((row: any) => row.Parcel_ID);
     const owners_by_parcel_id = df_owners_clean.reduce((acc: any, row: any) => {
         const parcelId = row.Parcel_ID;
@@ -150,10 +154,11 @@ const runProcess = (inputData: any, resultsData: any, log: LogFunction): OutputD
     const df_owners_grouped = new Map<string, any>();
     for (const parcelId in owners_by_parcel_id) {
         const group = owners_by_parcel_id[parcelId];
-        const owner_list: any[] = [];
         const processed_owners = new Set<string>();
+        const maxLength = 250;
+        let current_string = "";
 
-        group.forEach((row: any) => {
+        for (const row of group) {
             const owner_name_cleaned = cleanOwnerName(String(row.owner_name || ''));
             const owner_cf_cleaned = String(row.owner_cf || '').trim();
             const quota_cleaned = String(row.quota || '').trim();
@@ -161,30 +166,39 @@ const runProcess = (inputData: any, resultsData: any, log: LogFunction): OutputD
             const owner_key = `${owner_name_cleaned}|${owner_cf_cleaned}|${quota_cleaned}`;
 
             if ((owner_name_cleaned || owner_cf_cleaned) && !processed_owners.has(owner_key)) {
-                const owner_data: any = {
-                    nombre: owner_name_cleaned,
-                    cf: owner_cf_cleaned,
-                    cuota: quota_cleaned,
-                };
-                if (String(row.owner_type).toUpperCase() === 'COMPANY') {
-                    const pec = pec_map.get(owner_cf_cleaned);
-                    if (pec) {
-                        owner_data.pec = String(pec).trim();
+                const name_part = owner_name_cleaned || "";
+                const cf_part = owner_cf_cleaned || "N/A";
+                const quota_part = quota_cleaned || "N/A";
+
+                const owner_str = `${name_part} [${cf_part}, ${quota_part}]`;
+                
+                // Check length before adding
+                const separator = current_string ? ", " : "";
+                if (current_string.length + separator.length + owner_str.length > maxLength) {
+                    if (!current_string.endsWith("...")) {
+                        if (current_string === "") {
+                             // First owner is already too long
+                             current_string = owner_str.substring(0, maxLength - 3) + "...";
+                        } else {
+                            current_string += ", ...";
+                        }
                     }
+                    break; // Stop adding owners
                 }
-                owner_list.push(owner_data);
+
+                current_string += separator + owner_str;
                 processed_owners.add(owner_key);
             }
-        });
+        }
         
         df_owners_grouped.set(parcelId, {
-            'All Owners': owner_list.length > 0 ? JSON.stringify(owner_list, null, 2) : '',
+            'All Owners': current_string,
             'Number of Owners': processed_owners.size,
         });
     }
 
     // 2d. Prepare Main Owner from 'All_Raw_Data'
-    log("Selecting main owner for each parcel...");
+    log("Selecing main owner for each parcel...");
     const df_main_owner = [];
     const seen_parcel_ids = new Set();
     for(const row of resultsData['All_Raw_Data']) {
