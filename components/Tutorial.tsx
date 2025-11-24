@@ -7,7 +7,7 @@ export const Tutorial = () => {
     const toggleOpen = () => setIsOpen(!isOpen);
 
     return (
-        <div className="bg-slate-900/70 p-6 rounded-2xl shadow-lg border border-slate-700 mb-8">
+        <div className="bg-slate-900/70 p-6 rounded-2xl shadow-lg border border-slate-700 mb-8 transition-all hover:bg-slate-900/90 hover:shadow-green-900/10 hover:border-slate-600">
             <button
                 onClick={toggleOpen}
                 className="w-full flex justify-between items-center text-left text-2xl font-semibold text-green-400 focus:outline-none"
@@ -16,7 +16,7 @@ export const Tutorial = () => {
             >
                 <div className="flex items-center gap-3">
                     <BookOpenIcon className="w-7 h-7" />
-                    <span>How to Use This Tool</span>
+                    <span>Workflow Guide</span>
                 </div>
                 <ChevronDownIcon className={`w-6 h-6 transition-transform duration-300 ${isOpen ? 'rotate-180' : ''}`} />
             </button>
@@ -25,15 +25,15 @@ export const Tutorial = () => {
                     
                     {/* Phase 1 */}
                     <div>
-                        <h3 className="text-xl font-semibold text-slate-100 mb-3 border-b border-slate-600 pb-2">Phase 1: Generate Datasets with the Land Tool</h3>
+                        <h3 className="text-xl font-semibold text-slate-100 mb-3 border-b border-slate-600 pb-2">Step 1: Process & Download</h3>
                         <ol className="list-decimal list-inside space-y-2 pl-2">
-                            <li><strong>Upload Files:</strong> In Step 1, upload the <code className="bg-slate-800 px-1 rounded">Input File</code> and the <code className="bg-slate-800 px-1 rounded">Results File</code>. Wait for the green "File Validated" status for both.</li>
-                            <li><strong>Process Data:</strong> In Step 2, click the "Run Transformation" button.</li>
-                            <li><strong>Download Outputs:</strong> In Step 3, three download buttons will appear. Download each file:
-                                <ul className="list-disc list-inside pl-6 mt-1">
-                                    <li><code className="bg-slate-800 px-1 rounded">1_Scouted_Lands.xlsx</code> (Carga 1)</li>
-                                    <li><code className="bg-slate-800 px-1 rounded">2_Retrieved_Data.xlsx</code> (Carga 2)</li>
-                                    <li><code className="bg-slate-800 px-1 rounded">3_Contacted_Data.xlsx</code> (Carga 3)</li>
+                            <li>Upload the <code className="bg-slate-800 px-1 rounded text-green-200">Input File</code> and <code className="bg-slate-800 px-1 rounded text-green-200">Results File</code> above.</li>
+                            <li>Run the transformation to generate your datasets.</li>
+                            <li>Download the <strong>CSV</strong> files for each stage:
+                                <ul className="list-disc list-inside pl-6 mt-1 text-slate-400">
+                                    <li>Scouted (Carga 1)</li>
+                                    <li>Retrieved (Carga 2)</li>
+                                    <li>Contacted (Carga 3)</li>
                                 </ul>
                             </li>
                         </ol>
@@ -41,24 +41,22 @@ export const Tutorial = () => {
 
                     {/* Phase 2 */}
                     <div>
-                        <h3 className="text-xl font-semibold text-slate-100 mb-3 border-b border-slate-600 pb-2">Phase 2: Prepare CSVs for the Campaign</h3>
-                         <ol className="list-decimal list-inside space-y-2 pl-2">
-                            <li><strong>Paste into Master Templates:</strong> For each of the three downloaded files, open it, copy all the data, and paste it into the corresponding official **Master Excel Template**.
-                                <p className="text-sm text-amber-400 mt-1 pl-5">Note: Do not modify the downloaded files directly. Always use the Master Templates.</p>
-                            </li>
-                            <li><strong>Export to CSV:</strong> Inside each Master Template, specify the route where the CSV should be saved and use the template's functionality to export the data as a CSV file.</li>
-                        </ol>
-                    </div>
-
-                    {/* Phase 3 */}
-                    <div>
-                        <h3 className="text-xl font-semibold text-slate-100 mb-3 border-b border-slate-600 pb-2">Phase 3: Import into the CRM</h3>
-                        <p className="mb-2">Use the exported CSVs to manage leads in the Campaign object as follows:</p>
-                        <ul className="list-disc list-inside space-y-2 pl-2">
-                            <li><strong className="text-green-400">Carga 1 (Scouted CSV):</strong> Perform a <strong className="text-sky-400">"Create Records"</strong> operation. This imports all scouted parcels as new leads.</li>
-                            <li><strong className="text-green-400">Carga 2 (Retrieved CSV):</strong> Perform an <strong className="text-sky-400">"Update Records"</strong> operation. This updates the stage of the corresponding leads to <span className="font-semibold">"Retrieved"</span>.</li>
-                            <li><strong className="text-green-400">Carga 3 (Contacted CSV):</strong> Perform another <strong className="text-sky-400">"Update Records"</strong> operation. This updates the stage of the leads to <span className="font-semibold">"Contacted"</span>.</li>
-                        </ul>
+                        <h3 className="text-xl font-semibold text-slate-100 mb-3 border-b border-slate-600 pb-2">Step 2: Salesforce Import</h3>
+                        <p className="mb-2">Upload the CSV files directly to the Campaign object in Salesforce:</p>
+                        <div className="space-y-3 pl-2">
+                            <div className="bg-slate-800/50 p-3 rounded-lg border border-slate-700">
+                                <strong className="text-green-400 block mb-1">1. Scouted CSV</strong>
+                                <span className="text-sm">Perform a <strong className="text-sky-400">"Create Records"</strong> operation. This imports all scouted parcels as new leads.</span>
+                            </div>
+                            <div className="bg-slate-800/50 p-3 rounded-lg border border-slate-700">
+                                <strong className="text-green-400 block mb-1">2. Retrieved CSV</strong>
+                                <span className="text-sm">Perform an <strong className="text-sky-400">"Update Records"</strong> operation using the External ID. This updates the status to <span className="font-semibold text-white">"Retrieved"</span> and populates owner data.</span>
+                            </div>
+                            <div className="bg-slate-800/50 p-3 rounded-lg border border-slate-700">
+                                <strong className="text-green-400 block mb-1">3. Contacted CSV</strong>
+                                <span className="text-sm">Perform an <strong className="text-sky-400">"Update Records"</strong> operation using the External ID. This updates the status to <span className="font-semibold text-white">"Contacted"</span>.</span>
+                            </div>
+                        </div>
                     </div>
                 </div>
             )}

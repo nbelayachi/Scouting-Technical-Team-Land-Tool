@@ -11,7 +11,7 @@ interface DropzoneProps {
     errorMessage?: string | null;
 }
 
-export const Dropzone = ({ title, description, onFileSelect, status, fileName, errorMessage }: DropzoneProps) => {
+export const Dropzone: React.FC<DropzoneProps> = ({ title, description, onFileSelect, status, fileName, errorMessage }) => {
     const [isDragOver, setIsDragOver] = useState(false);
 
     const handleDragEnter = (e: React.DragEvent<HTMLDivElement>) => {

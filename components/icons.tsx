@@ -67,12 +67,8 @@ export const RefreshIcon = (props: React.SVGProps<SVGSVGElement>) => (
   </svg>
 );
 
-
-export const RicLogoIcon = (props: React.SVGProps<SVGSVGElement>) => (
-    <svg {...props} viewBox="0 0 512 512" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
-        <path d="M106.667 42.6667C75.4733 42.6667 50.1333 68.0067 50.1333 99.2C50.1333 130.393 75.4733 155.733 106.667 155.733C137.86 155.733 163.2 130.393 163.2 99.2C163.2 68.0067 137.86 42.6667 106.667 42.6667Z" />
-        <path d="M0 204.8V294.4C138.24 253.44 296.96 335.36 512 294.4V204.8C373.76 245.76 215.04 163.84 0 204.8Z" />
-        <path d="M0 311.467V426.667C186.347 375.467 322.133 448 512 426.667V337.067C398.933 366.933 211.2 320 0 311.467Z" />
-        <path d="M0 469.333H512V512H0V469.333Z" />
+export const CsvIcon = (props: React.SVGProps<SVGSVGElement>) => (
+    <svg {...props} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
     </svg>
 );

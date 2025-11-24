@@ -1,3 +1,5 @@
+
+
 type LogFunction = (message: string, type?: 'info' | 'error' | 'success') => void;
 
 export interface ValidationResult {
@@ -9,6 +11,9 @@ export interface OutputData {
     scouted: any[];
     retrieved: any[];
     contacted: any[];
+    csvScouted: any[];
+    csvRetrieved: any[];
+    csvContacted: any[];
 }
 
 // --- Helper Functions ---
@@ -96,6 +101,232 @@ const validateResultsFile = (jsonData: { [sheetName: string]: any[] }): Validati
     return { isValid: errors.length === 0, errors };
 };
 
+// --- CSV Helpers & constants ---
+
+// Master list of Italian Provinces with valid Salesforce names, Codes, and Regions
+const ITALIAN_PROVINCES = [
+    { name: "Agrigento", code: "AG", region: "Sicilia" },
+    { name: "Alessandria", code: "AL", region: "Piemonte" },
+    { name: "Ancona", code: "AN", region: "Marche" },
+    { name: "Aosta", code: "AO", region: "Valle d'Aosta" },
+    { name: "Arezzo", code: "AR", region: "Toscana" },
+    { name: "Ascoli Piceno", code: "AP", region: "Marche" },
+    { name: "Asti", code: "AT", region: "Piemonte" },
+    { name: "Avellino", code: "AV", region: "Campania" },
+    { name: "Bari", code: "BA", region: "Puglia" },
+    { name: "Barletta-Andria-Trani", code: "BT", region: "Puglia" },
+    { name: "Belluno", code: "BL", region: "Veneto" },
+    { name: "Benevento", code: "BN", region: "Campania" },
+    { name: "Bergamo", code: "BG", region: "Lombardia" },
+    { name: "Biella", code: "BI", region: "Piemonte" },
+    { name: "Bologna", code: "BO", region: "Emilia-Romagna" },
+    { name: "Bolzano", code: "BZ", region: "Trentino-Alto Adige" },
+    { name: "Brescia", code: "BS", region: "Lombardia" },
+    { name: "Brindisi", code: "BR", region: "Puglia" },
+    { name: "Cagliari", code: "CA", region: "Sardegna" },
+    { name: "Caltanissetta", code: "CL", region: "Sicilia" },
+    { name: "Campobasso", code: "CB", region: "Molise" },
+    { name: "Carbonia-Iglesias", code: "CI", region: "Sardegna" },
+    { name: "Caserta", code: "CE", region: "Campania" },
+    { name: "Catania", code: "CT", region: "Sicilia" },
+    { name: "Catanzaro", code: "CZ", region: "Calabria" },
+    { name: "Chieti", code: "CH", region: "Abruzzo" },
+    { name: "Como", code: "CO", region: "Lombardia" },
+    { name: "Cosenza", code: "CS", region: "Calabria" },
+    { name: "Cremona", code: "CR", region: "Lombardia" },
+    { name: "Crotone", code: "KR", region: "Calabria" },
+    { name: "Cuneo", code: "CN", region: "Piemonte" },
+    { name: "Enna", code: "EN", region: "Sicilia" },
+    { name: "Fermo", code: "FM", region: "Marche" },
+    { name: "Ferrara", code: "FE", region: "Emilia-Romagna" },
+    { name: "Firenze", code: "FI", region: "Toscana" },
+    { name: "Foggia", code: "FG", region: "Puglia" },
+    { name: "Forlì-Cesena", code: "FC", region: "Emilia-Romagna" },
+    { name: "Frosinone", code: "FR", region: "Lazio" },
+    { name: "Genova", code: "GE", region: "Liguria" },
+    { name: "Gorizia", code: "GO", region: "Friuli-Venezia Giulia" },
+    { name: "Grosseto", code: "GR", region: "Toscana" },
+    { name: "Imperia", code: "IM", region: "Liguria" },
+    { name: "Isernia", code: "IS", region: "Molise" },
+    { name: "La Spezia", code: "SP", region: "Liguria" },
+    { name: "L'Aquila", code: "AQ", region: "Abruzzo" },
+    { name: "Latina", code: "LT", region: "Lazio" },
+    { name: "Lecce", code: "LE", region: "Puglia" },
+    { name: "Lecco", code: "LC", region: "Lombardia" },
+    { name: "Livorno", code: "LI", region: "Toscana" },
+    { name: "Lodi", code: "LO", region: "Lombardia" },
+    { name: "Lucca", code: "LU", region: "Toscana" },
+    { name: "Macerata", code: "MC", region: "Marche" },
+    { name: "Mantova", code: "MN", region: "Lombardia" },
+    { name: "Massa-Carrara", code: "MS", region: "Toscana" },
+    { name: "Matera", code: "MT", region: "Basilicata" },
+    { name: "Medio Campidano", code: "VS", region: "Sardegna" },
+    { name: "Messina", code: "ME", region: "Sicilia" },
+    { name: "Milano", code: "MI", region: "Lombardia" },
+    { name: "Modena", code: "MO", region: "Emilia-Romagna" },
+    { name: "Monza e della Brianza", code: "MB", region: "Lombardia" },
+    { name: "Napoli", code: "NA", region: "Campania" },
+    { name: "Novara", code: "NO", region: "Piemonte" },
+    { name: "Nuoro", code: "NU", region: "Sardegna" },
+    { name: "Ogliastra", code: "OG", region: "Sardegna" },
+    { name: "Olbia-Tempio", code: "OT", region: "Sardegna" },
+    { name: "Oristano", code: "OR", region: "Sardegna" },
+    { name: "Padova", code: "PD", region: "Veneto" },
+    { name: "Palermo", code: "PA", region: "Sicilia" },
+    { name: "Parma", code: "PR", region: "Emilia-Romagna" },
+    { name: "Pavia", code: "PV", region: "Lombardia" },
+    { name: "Perugia", code: "PG", region: "Umbria" },
+    { name: "Pesaro e Urbino", code: "PU", region: "Marche" },
+    { name: "Pescara", code: "PE", region: "Abruzzo" },
+    { name: "Piacenza", code: "PC", region: "Emilia-Romagna" },
+    { name: "Pisa", code: "PI", region: "Toscana" },
+    { name: "Pistoia", code: "PT", region: "Toscana" },
+    { name: "Pordenone", code: "PN", region: "Friuli-Venezia Giulia" },
+    { name: "Potenza", code: "PZ", region: "Basilicata" },
+    { name: "Prato", code: "PO", region: "Toscana" },
+    { name: "Ragusa", code: "RG", region: "Sicilia" },
+    { name: "Ravenna", code: "RA", region: "Emilia-Romagna" },
+    { name: "Reggio Calabria", code: "RC", region: "Calabria" },
+    { name: "Reggio Emilia", code: "RE", region: "Emilia-Romagna" },
+    { name: "Rieti", code: "RI", region: "Lazio" },
+    { name: "Rimini", code: "RN", region: "Emilia-Romagna" },
+    { name: "Roma", code: "RM", region: "Lazio" },
+    { name: "Rovigo", code: "RO", region: "Veneto" },
+    { name: "Salerno", code: "SA", region: "Campania" },
+    { name: "Sassari", code: "SS", region: "Sardegna" },
+    { name: "Savona", code: "SV", region: "Liguria" },
+    { name: "Siena", code: "SI", region: "Toscana" },
+    { name: "Siracusa", code: "SR", region: "Sicilia" },
+    { name: "Sondrio", code: "SO", region: "Lombardia" },
+    { name: "Taranto", code: "TA", region: "Puglia" },
+    { name: "Teramo", code: "TE", region: "Abruzzo" },
+    { name: "Terni", code: "TR", region: "Umbria" },
+    { name: "Torino", code: "TO", region: "Piemonte" },
+    { name: "Trapani", code: "TP", region: "Sicilia" },
+    { name: "Trento", code: "TN", region: "Trentino-Alto Adige" },
+    { name: "Treviso", code: "TV", region: "Veneto" },
+    { name: "Trieste", code: "TS", region: "Friuli-Venezia Giulia" },
+    { name: "Udine", code: "UD", region: "Friuli-Venezia Giulia" },
+    { name: "Varese", code: "VA", region: "Lombardia" },
+    { name: "Venezia", code: "VE", region: "Veneto" },
+    { name: "Verbano-Cusio-Ossola", code: "VB", region: "Piemonte" },
+    { name: "Vercelli", code: "VC", region: "Piemonte" },
+    { name: "Verona", code: "VR", region: "Veneto" },
+    { name: "Vibo Valentia", code: "VV", region: "Calabria" },
+    { name: "Vicenza", code: "VI", region: "Veneto" },
+    { name: "Viterbo", code: "VT", region: "Lazio" }
+];
+
+// Generate map for fast lookup by Name or Code (both uppercase)
+const PROVINCE_MAP: { [key: string]: { code: string, region: string, name: string } } = {};
+
+ITALIAN_PROVINCES.forEach(p => {
+    const entry = { code: p.code, region: p.region, name: p.name };
+    // Map Name Upper
+    PROVINCE_MAP[p.name.toUpperCase()] = entry;
+    // Map Code Upper
+    PROVINCE_MAP[p.code.toUpperCase()] = entry;
+    
+    // Handle variants with accents (e.g. Forli vs Forlì)
+    if (p.name.includes('ì') || p.name.includes('à') || p.name.includes('è') || p.name.includes('ò') || p.name.includes('ù')) {
+         const normalized = p.name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
+         PROVINCE_MAP[normalized] = entry;
+    }
+});
+
+// Manual overrides for specific input variations
+PROVINCE_MAP['MONZA E BRIANZA'] = PROVINCE_MAP['MONZA E DELLA BRIANZA'];
+PROVINCE_MAP['CARBONIA IGLESIAS'] = PROVINCE_MAP['CARBONIA-IGLESIAS'];
+PROVINCE_MAP['MEDIO-CAMPIDANO'] = PROVINCE_MAP['MEDIO CAMPIDANO'];
+PROVINCE_MAP['OLBIA TEMPIO'] = PROVINCE_MAP['OLBIA-TEMPIO'];
+PROVINCE_MAP['PESARO URBINO'] = PROVINCE_MAP['PESARO E URBINO'];
+PROVINCE_MAP['REGGIO NELL\'EMILIA'] = PROVINCE_MAP['REGGIO EMILIA'];
+PROVINCE_MAP['BOLZANO/BOZEN'] = PROVINCE_MAP['BOLZANO'];
+PROVINCE_MAP['AOSTA/AOSTE'] = PROVINCE_MAP['AOSTA'];
+
+
+const getProvinceDetails = (input: string) => {
+    const key = String(input).toUpperCase().trim();
+    if (PROVINCE_MAP[key]) {
+        return PROVINCE_MAP[key];
+    }
+    // Fallback logic
+    if (key.length === 2) {
+        return { code: key, region: '', name: input }; // Use input as name if code is unknown
+    }
+    return { code: key.substring(0, 2).toUpperCase(), region: '', name: input }; // Use input as name
+};
+
+const generateExternalId = (provinceCode: string, municipality: string, section: string, sheet: string, parcel: string) => {
+    const mun = String(municipality).toUpperCase().replace(/\s+/g, '');
+    const sec = section && section.trim() !== '' ? section.trim() : 'X';
+    
+    // Pad Sheet to 4 digits
+    const sheetNum = parseInt(sheet);
+    const sheetStr = !isNaN(sheetNum) ? String(sheetNum).padStart(4, '0') : String(sheet).padStart(4, '0');
+    
+    // Pad Parcel to 5 digits
+    const parcelNum = parseInt(parcel);
+    const parcelStr = !isNaN(parcelNum) ? String(parcelNum).padStart(5, '0') : String(parcel).padStart(5, '0');
+
+    return `${provinceCode}-${mun}-${sec}-${sheetStr}-${parcelStr}`;
+};
+
+const formatDecimalForCsv = (val: any): string => {
+    if (val === null || val === undefined || val === '') return '';
+    // Ensure it uses comma for decimal separator for European standard CSVs often used here
+    return String(val).replace('.', ',');
+};
+
+
+const mapToCsvRow = (row: any, status: string) => {
+    const provDetails = getProvinceDetails(row['Province']);
+    const provinceCode = provDetails.code;
+    const region = provDetails.region;
+    // Use the official Salesforce Name if available (e.g. "Bergamo" instead of "BG")
+    const provinceName = provDetails.name || row['Province'];
+    
+    // Generate External ID
+    const externalId = generateExternalId(
+        provinceCode, 
+        row['Municipality'], 
+        row['Section'], 
+        row['Sheet'], 
+        row['Parcel']
+    );
+    
+    // 'True'/'False' strings for CSV
+    let hasVariousOwners = 'False';
+    let numberOfOwners = '';
+    
+    if (row['Number of Owners'] !== undefined && row['Number of Owners'] !== null && row['Number of Owners'] !== '') {
+        numberOfOwners = String(row['Number of Owners']);
+         if (Number(row['Number of Owners']) > 1) {
+            hasVariousOwners = 'True';
+        }
+    }
+    
+    return {
+        "Land External ID": externalId,
+        "Lead Status": status,
+        "Land Province": provinceName,
+        "Land Region": region,
+        "Municipality": row['Municipality'],
+        "Sezione": row['Section'],
+        "Foglio": row['Sheet'],
+        "Particella": row['Parcel'],
+        "Cadastral Area (Ha)": formatDecimalForCsv(row['Cadastral Area (Ha)']),
+        "Main Owner Name": row['Main Owner Name'],
+        "Main Owner Last Name": row['Main Owner Last Name'],
+        "Email": row['Email'],
+        "Fiscal Code": row['Fiscal Code'],
+        "CP": row['CP'],
+        "Has Various Owners": hasVariousOwners,
+        "Number of Owners": numberOfOwners,
+        "All Owners": row['All Owners']
+    };
+};
+
 // --- Core Transformation Logic ---
 const runProcess = (inputData: any, resultsData: any, log: LogFunction): OutputData => {
 
@@ -111,18 +342,22 @@ const runProcess = (inputData: any, resultsData: any, log: LogFunction): OutputD
         row['Municipality'] = row['comune'];
         row['Sheet'] = String(row['foglio']).split('.')[0];
         row['Parcel'] = String(row['particella']).split('.')[0];
-        row['Catastral Area (Ha)'] = row['Area'];
+        row['Cadastral Area (Ha)'] = row['Area']; // Map to correct Salesforce label key
         row['Section'] = row['Sezione'];
     });
     
     // --- GENERATE CARGA 1 ---
     log("Generating Carga 1: Scouted Lands...");
-    const carga1_cols = ['Province', 'Municipality', 'Section', 'Sheet', 'Parcel', 'Catastral Area (Ha)', 'CP'];
+    const carga1_cols = ['Province', 'Municipality', 'Section', 'Sheet', 'Parcel', 'Cadastral Area (Ha)', 'CP'];
     const scouted = df_base.map(row => {
         const newRow: {[key: string]: any} = {};
         carga1_cols.forEach(col => newRow[col] = row[col] || '');
         return newRow;
     });
+
+    // Generate CSV version
+    const csvScouted = df_base.map(row => mapToCsvRow(row, 'Scouted'));
+
     log(`-> Carga 1 generated with ${scouted.length} rows.`, 'success');
 
     // --- 2. PREPARE RETRIEVED DATA (CARGA 2) ---
@@ -155,7 +390,7 @@ const runProcess = (inputData: any, resultsData: any, log: LogFunction): OutputD
     for (const parcelId in owners_by_parcel_id) {
         const group = owners_by_parcel_id[parcelId];
         const processed_owners = new Set<string>();
-        const maxLength = 250;
+        const maxLength = 3000; // Increased to ensure we catch most
         let current_string = "";
 
         for (const row of group) {
@@ -174,16 +409,13 @@ const runProcess = (inputData: any, resultsData: any, log: LogFunction): OutputD
                 
                 // Check length before adding
                 const separator = current_string ? ", " : "";
+                // Limit owner string length to avoid CSV cell overflow issues if necessary, 
+                // but kept generous here.
                 if (current_string.length + separator.length + owner_str.length > maxLength) {
-                    if (!current_string.endsWith("...")) {
-                        if (current_string === "") {
-                             // First owner is already too long
-                             current_string = owner_str.substring(0, maxLength - 3) + "...";
-                        } else {
-                            current_string += ", ...";
-                        }
+                     if (!current_string.endsWith("...")) {
+                        current_string += ", ...";
                     }
-                    break; // Stop adding owners
+                    break;
                 }
 
                 current_string += separator + owner_str;
@@ -198,7 +430,7 @@ const runProcess = (inputData: any, resultsData: any, log: LogFunction): OutputD
     }
 
     // 2d. Prepare Main Owner from 'All_Raw_Data'
-    log("Selecing main owner for each parcel...");
+    log("Selecting main owner for each parcel...");
     const df_main_owner = [];
     const seen_parcel_ids = new Set();
     for(const row of resultsData['All_Raw_Data']) {
@@ -276,7 +508,7 @@ const runProcess = (inputData: any, resultsData: any, log: LogFunction): OutputD
     // --- GENERATE CARGA 2 ---
     const carga2_cols = [
         'Province', 'Municipality', 'Section', 'Sheet', 'Parcel', 
-        'Catastral Area (Ha)', 'CP', 'Main Owner Name', 'Main Owner Last Name', 
+        'Cadastral Area (Ha)', 'CP', 'Main Owner Name', 'Main Owner Last Name', 
         'Fiscal Code', 'Email', 'Number of Owners', 'All Owners'
     ];
 
@@ -285,6 +517,10 @@ const runProcess = (inputData: any, resultsData: any, log: LogFunction): OutputD
         carga2_cols.forEach(col => newRow[col] = row[col] ?? ''); // Use ?? to handle 0 for Number of Owners
         return newRow;
     });
+
+    // Generate CSV version
+    const csvRetrieved = df_carga_2_filtered.map(row => mapToCsvRow(row, 'Retrieved'));
+
     log(`-> Carga 2 generated with ${retrieved.length} rows.`, 'success');
 
     // --- 3. PREPARE CONTACTED DATA (CARGA 3) ---
@@ -299,9 +535,13 @@ const runProcess = (inputData: any, resultsData: any, log: LogFunction): OutputD
         carga2_cols.forEach(col => newRow[col] = row[col] ?? '');
         return newRow;
     });
+
+    // Generate CSV version
+    const csvContacted = df_carga_3.map(row => mapToCsvRow(row, 'Contacted'));
+
     log(`-> Carga 3 generated with ${contacted.length} rows.`, 'success');
 
-    return { scouted, retrieved, contacted };
+    return { scouted, retrieved, contacted, csvScouted, csvRetrieved, csvContacted };
 };
 
 // --- Main Exported Function ---
