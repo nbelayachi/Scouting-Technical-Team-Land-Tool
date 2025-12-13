@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { BookOpenIcon, ChevronDownIcon } from './icons';
 
@@ -16,7 +17,7 @@ export const Tutorial = () => {
             >
                 <div className="flex items-center gap-3">
                     <BookOpenIcon className="w-7 h-7" />
-                    <span>Workflow Guide</span>
+                    <span>Workflow Guide & Structure</span>
                 </div>
                 <ChevronDownIcon className={`w-6 h-6 transition-transform duration-300 ${isOpen ? 'rotate-180' : ''}`} />
             </button>
@@ -57,6 +58,35 @@ export const Tutorial = () => {
                                 <span className="text-sm">Perform an <strong className="text-sky-400">"Update Records"</strong> operation using the External ID. This updates the status to <span className="font-semibold text-white">"Contacted"</span>.</span>
                             </div>
                         </div>
+                    </div>
+
+                    {/* Phase 3: Reference */}
+                    <div>
+                         <h3 className="text-xl font-semibold text-slate-100 mb-3 border-b border-slate-600 pb-2">File Structure Reference</h3>
+                         <div className="space-y-4">
+                            <div>
+                                <h4 className="text-green-400 font-bold text-sm">Input File (Excel)</h4>
+                                <p className="text-xs text-slate-400 mb-1">Sheet: <span className="text-slate-300">Hoja1</span> or <span className="text-slate-300">Sheet1</span></p>
+                                <p className="text-xs text-slate-400">Columns: <span className="font-mono text-slate-300">provincia, comune, foglio, particella, Area, Sezione, CP, Parcel_ID</span></p>
+                            </div>
+                            <div>
+                                <h4 className="text-green-400 font-bold text-sm">Results File (Excel)</h4>
+                                <ul className="list-disc list-inside space-y-2 text-xs text-slate-400">
+                                    <li>
+                                        <span className="text-slate-300 font-semibold">All_Raw_Data</span>: <span className="font-mono">Parcel_ID, cf_owner, denominazione_owner, nome, cognome</span>
+                                    </li>
+                                    <li>
+                                        <span className="text-slate-300 font-semibold">Owners_Normalized</span>: <span className="font-mono">Parcel_ID, owner_name, owner_cf, quota</span>
+                                    </li>
+                                    <li>
+                                        <span className="text-slate-300 font-semibold">All_Companies_Found</span>: <span className="font-mono">cf, pec_email</span>
+                                    </li>
+                                    <li>
+                                        <span className="text-slate-300 font-semibold">Final_Mailing_By_Parcel</span>: <span className="font-mono">Parcel_ID</span>
+                                    </li>
+                                </ul>
+                            </div>
+                         </div>
                     </div>
                 </div>
             )}

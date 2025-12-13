@@ -27,6 +27,21 @@ const cleanOwnerName = (name: any): string => {
     return cleanedName.trim();
 };
 
+const truncate = (str: any, maxLength: number): string => {
+    if (!str) return '';
+    const s = String(str);
+    if (s.length <= maxLength) return s;
+    return s.substring(0, maxLength);
+};
+
+// Remove newlines, tabs, and excess whitespace to prevent CSV breakage
+const sanitize = (val: any): string => {
+    if (val === null || val === undefined) return '';
+    const s = String(val);
+    // Replace newline/tab with space, then collapse multiple spaces
+    return s.replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim();
+};
+
 const readFileSheets = (file: File): Promise<{ [sheetName: string]: any[] }> => {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
@@ -55,14 +70,20 @@ const readFileSheets = (file: File): Promise<{ [sheetName: string]: any[] }> => 
 const validateInputFile = (jsonData: { [sheetName: string]: any[] }): ValidationResult => {
     const errors: string[] = [];
     if (!jsonData['Hoja1'] && !jsonData['Sheet1']) {
-        errors.push("Input file is missing required sheet: 'Hoja1' or 'Sheet1'.");
+        const foundSheets = Object.keys(jsonData).join(', ');
+        errors.push(`Input file is missing required sheet: 'Hoja1' or 'Sheet1'. Found sheets: ${foundSheets || 'none'}`);
     } else {
         const sheet = jsonData['Hoja1'] || jsonData['Sheet1'];
-        const requiredCols = ['provincia', 'comune', 'foglio', 'particella', 'Area', 'Sezione', 'CP', 'Parcel_ID'];
-        const firstRow = sheet[0] || {};
-        const missingCols = requiredCols.filter(col => !(col in firstRow));
-        if (missingCols.length > 0) {
-            errors.push(`Input file is missing columns: ${missingCols.join(', ')}.`);
+        if (sheet.length === 0) {
+             errors.push("Input file sheet is empty.");
+        } else {
+            const requiredCols = ['provincia', 'comune', 'foglio', 'particella', 'Area', 'Sezione', 'CP', 'Parcel_ID'];
+            const firstRow = sheet[0] || {};
+            const missingCols = requiredCols.filter(col => !(col in firstRow));
+            if (missingCols.length > 0) {
+                const foundCols = Object.keys(firstRow).join(', ');
+                errors.push(`Input file is missing columns: ${missingCols.join(', ')}. Found columns: ${foundCols}`);
+            }
         }
     }
     return { isValid: errors.length === 0, errors };
@@ -72,31 +93,55 @@ const validateResultsFile = (jsonData: { [sheetName: string]: any[] }): Validati
     const errors: string[] = [];
     const requiredSheets = ['All_Raw_Data', 'Owners_Normalized', 'All_Companies_Found', 'Final_Mailing_By_Parcel'];
 
-    for (const sheet of requiredSheets) {
-        if (!jsonData[sheet]) {
-            errors.push(`Results file is missing required sheet: '${sheet}'.`);
-        }
+    const missingSheets = requiredSheets.filter(sheet => !jsonData[sheet]);
+    if (missingSheets.length > 0) {
+        const foundSheets = Object.keys(jsonData).join(', ');
+        errors.push(`Results file is missing required sheets: ${missingSheets.join(', ')}. Found sheets: ${foundSheets || 'none'}`);
     }
     
-    // Add column checks for critical sheets if needed
+    // Check columns for 'All_Raw_Data'
     if (jsonData['All_Raw_Data']) {
         const firstRow = jsonData['All_Raw_Data'][0] || {};
         const requiredCols = ['Parcel_ID', 'cf_owner', 'denominazione_owner', 'nome', 'cognome'];
         const missingCols = requiredCols.filter(col => !(col in firstRow));
         if (missingCols.length > 0) {
-            errors.push(`Results file sheet 'All_Raw_Data' is missing columns: ${missingCols.join(', ')}.`);
+            const foundCols = Object.keys(firstRow).join(', ');
+            errors.push(`Sheet 'All_Raw_Data' is missing columns: ${missingCols.join(', ')}. Found: ${foundCols}`);
         }
     }
 
-     if (jsonData['Owners_Normalized']) {
+    // Check columns for 'Owners_Normalized'
+    if (jsonData['Owners_Normalized']) {
         const firstRow = jsonData['Owners_Normalized'][0] || {};
         const requiredCols = ['Parcel_ID', 'owner_name', 'owner_cf', 'quota'];
         const missingCols = requiredCols.filter(col => !(col in firstRow));
         if (missingCols.length > 0) {
-            errors.push(`Results file sheet 'Owners_Normalized' is missing columns: ${missingCols.join(', ')}.`);
+             const foundCols = Object.keys(firstRow).join(', ');
+            errors.push(`Sheet 'Owners_Normalized' is missing columns: ${missingCols.join(', ')}. Found: ${foundCols}`);
         }
     }
 
+    // Check columns for 'All_Companies_Found'
+    if (jsonData['All_Companies_Found']) {
+        const firstRow = jsonData['All_Companies_Found'][0] || {};
+        const requiredCols = ['cf', 'pec_email'];
+        const missingCols = requiredCols.filter(col => !(col in firstRow));
+        if (missingCols.length > 0) {
+             const foundCols = Object.keys(firstRow).join(', ');
+            errors.push(`Sheet 'All_Companies_Found' is missing columns: ${missingCols.join(', ')}. Found: ${foundCols}`);
+        }
+    }
+
+    // Check columns for 'Final_Mailing_By_Parcel'
+    if (jsonData['Final_Mailing_By_Parcel']) {
+        const firstRow = jsonData['Final_Mailing_By_Parcel'][0] || {};
+        const requiredCols = ['Parcel_ID'];
+        const missingCols = requiredCols.filter(col => !(col in firstRow));
+        if (missingCols.length > 0) {
+             const foundCols = Object.keys(firstRow).join(', ');
+            errors.push(`Sheet 'Final_Mailing_By_Parcel' is missing columns: ${missingCols.join(', ')}. Found: ${foundCols}`);
+        }
+    }
 
     return { isValid: errors.length === 0, errors };
 };
@@ -306,45 +351,85 @@ const mapToCsvRow = (row: any, status: string) => {
         }
     }
     
+    // Use 'Pending Owner' if status is Scouted (new leads) and we have no owner info.
+    // This prevents "Required field missing: LastName" errors in Salesforce.
+    // For other statuses (Retrieved, Contacted), we use what we have (even if empty, though ideally it shouldn't be).
+    let lastName = sanitize(row['Main Owner Last Name']);
+    if (!lastName && status === 'Scouted') {
+        lastName = 'Pending Owner';
+    } else if (!lastName) {
+        // Fallback for empty last name in other stages to avoid SF errors if it's mandatory
+        // We truncate External ID just in case, though it shouldn't be long.
+        lastName = `Unknown ${externalId}`.substring(0, 80);
+    }
+    
     return {
-        "Land External ID": externalId,
+        "Land External ID": sanitize(externalId),
         "Lead Status": status,
-        "Land Province": provinceName,
-        "Land Region": region,
-        "Municipality": row['Municipality'],
-        "Sezione": row['Section'],
-        "Foglio": row['Sheet'],
-        "Particella": row['Parcel'],
+        "Land Province": sanitize(provinceName),
+        "Land Region": sanitize(region),
+        "Minimum Scope Group": "Pending Project Scope",
+        "Municipality": sanitize(row['Municipality']),
+        "Sezione": sanitize(row['Section']),
+        "Foglio": sanitize(row['Sheet']),
+        "Particella": sanitize(row['Parcel']),
         "Cadastral Area (Ha)": formatDecimalForCsv(row['Cadastral Area (Ha)']),
-        "Main Owner Name": row['Main Owner Name'],
-        "Main Owner Last Name": row['Main Owner Last Name'],
-        "Email": row['Email'],
-        "Fiscal Code": row['Fiscal Code'],
-        "CP": row['CP'],
+        "Main Owner Name": truncate(sanitize(row['Main Owner Name']), 40), // Standard SF limit
+        "Main Owner Last Name": truncate(lastName, 80), // Standard SF limit
+        "Email": sanitize(row['Email']),
+        "Fiscal Code": sanitize(row['Fiscal Code']),
+        "CP": sanitize(row['CP']),
         "Has Various Owners": hasVariousOwners,
         "Number of Owners": numberOfOwners,
-        "All Owners": row['All Owners']
+        "All Owners": truncate(sanitize(row['All Owners']), 255) // Custom field limit
     };
 };
 
 // --- Core Transformation Logic ---
-const runProcess = (inputData: any, resultsData: any, log: LogFunction): OutputData => {
+const runProcess = (inputData: any, resultsData: any, log: LogFunction, inputJson?: any, resultsJson?: any): OutputData => {
 
     const inputSheet = inputData['Hoja1'] || inputData['Sheet1'];
 
     // --- 1. PREPARE BASE DF (from Input file) ---
     log("Preparing base data (Carga 1)...");
-    let df_base = [...inputSheet];
-    df_base = df_base.filter(row => row['Parcel_ID'] != null && row['Parcel_ID'] !== '');
+    let raw_base = [...inputSheet];
+    raw_base = raw_base.filter(row => row['Parcel_ID'] != null && row['Parcel_ID'] !== '');
 
-    df_base.forEach(row => {
+    // Deduplication Logic: Ensure we only process unique External IDs from the input
+    const seenIds = new Set<string>();
+    const df_base: any[] = [];
+    let duplicateCount = 0;
+
+    raw_base.forEach(row => {
+        // Map common fields
         row['Province'] = row['provincia'];
         row['Municipality'] = row['comune'];
         row['Sheet'] = String(row['foglio']).split('.')[0];
         row['Parcel'] = String(row['particella']).split('.')[0];
         row['Cadastral Area (Ha)'] = row['Area']; // Map to correct Salesforce label key
         row['Section'] = row['Sezione'];
+
+        // Generate ID for deduplication check
+        const provDetails = getProvinceDetails(row['Province']);
+        const extId = generateExternalId(
+            provDetails.code,
+            row['Municipality'],
+            row['Section'],
+            row['Sheet'],
+            row['Parcel']
+        );
+
+        if (!seenIds.has(extId)) {
+            seenIds.add(extId);
+            df_base.push(row);
+        } else {
+            duplicateCount++;
+        }
     });
+
+    if (duplicateCount > 0) {
+        log(`Removed ${duplicateCount} duplicate parcel(s) based on generated External ID.`, 'info');
+    }
     
     // --- GENERATE CARGA 1 ---
     log("Generating Carga 1: Scouted Lands...");
@@ -390,7 +475,7 @@ const runProcess = (inputData: any, resultsData: any, log: LogFunction): OutputD
     for (const parcelId in owners_by_parcel_id) {
         const group = owners_by_parcel_id[parcelId];
         const processed_owners = new Set<string>();
-        const maxLength = 3000; // Increased to ensure we catch most
+        const maxLength = 3000; // Keep high for Excel viewing, truncated only in CSV
         let current_string = "";
 
         for (const row of group) {
@@ -409,8 +494,6 @@ const runProcess = (inputData: any, resultsData: any, log: LogFunction): OutputD
                 
                 // Check length before adding
                 const separator = current_string ? ", " : "";
-                // Limit owner string length to avoid CSV cell overflow issues if necessary, 
-                // but kept generous here.
                 if (current_string.length + separator.length + owner_str.length > maxLength) {
                      if (!current_string.endsWith("...")) {
                         current_string += ", ...";
