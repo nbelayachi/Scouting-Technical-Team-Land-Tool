@@ -22,9 +22,22 @@ const cleanOwnerName = (name: any): string => {
     if (name === null || typeof name === 'undefined' || typeof name !== 'string') {
         return '';
     }
-    // Updated regex to handle 'nato a', 'nata a' and 'nato/a a'
-    const cleanedName = name.split(/\s+nat[oa](?:\/a)?\s+a\s+/i)[0];
-    return cleanedName.trim();
+    let s = name;
+
+    // 1. Remove "Unknown AA-BBBB-..." pattern (generated External ID fallback)
+    s = s.replace(/Unknown\s+[A-Z]{2}-[\w\d]+-[A-Z0-9]+-\d{4}-\d{5}/gi, '');
+
+    // 2. Remove "Timeout-Pending" text if present inside a name
+    s = s.replace(/Timeout-Pending/gi, '');
+
+    // 3. Handle 'nato a', 'nata a' and 'nato/a a' - keep part before it
+    s = s.split(/\s+nat[oa](?:\/a)?\s+a\s+/i)[0];
+    
+    // 4. Handle semicolon separator (often used for parentage like "; DI ANTONIO")
+    s = s.split(';')[0];
+
+    // 5. Collapse multiple spaces and trim
+    return s.replace(/\s+/g, ' ').trim();
 };
 
 const truncate = (str: any, maxLength: number): string => {
@@ -40,6 +53,41 @@ const sanitize = (val: any): string => {
     const s = String(val);
     // Replace newline/tab with space, then collapse multiple spaces
     return s.replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim();
+};
+
+const normalizeMuni = (m: any): string => {
+    return String(m || '').trim().toLowerCase();
+};
+
+const parseQuota = (quotaStr: any): number => {
+    if (quotaStr === null || quotaStr === undefined) return 0;
+    const s = String(quotaStr).trim();
+    
+    // Handle fraction "1/2", "1000/1000"
+    if (s.includes('/')) {
+        const parts = s.split('/');
+        if (parts.length === 2) {
+            const num = parseFloat(parts[0]);
+            const den = parseFloat(parts[1]);
+            if (!isNaN(num) && !isNaN(den) && den !== 0) {
+                return num / den;
+            }
+        }
+    }
+    
+    // Handle decimal or integer (replace comma with dot for European formats)
+    const f = parseFloat(s.replace(',', '.'));
+    return isNaN(f) ? 0 : f;
+};
+
+// Helper to find column case-insensitive and handle aliases
+const findCol = (row: any, candidates: string[]) => {
+    const keys = Object.keys(row);
+    for (const c of candidates) {
+        const found = keys.find(k => k.toLowerCase() === c.toLowerCase());
+        if (found) return row[found];
+    }
+    return undefined;
 };
 
 const readFileSheets = (file: File): Promise<{ [sheetName: string]: any[] }> => {
@@ -135,11 +183,19 @@ const validateResultsFile = (jsonData: { [sheetName: string]: any[] }): Validati
     // Check columns for 'Final_Mailing_By_Parcel'
     if (jsonData['Final_Mailing_By_Parcel']) {
         const firstRow = jsonData['Final_Mailing_By_Parcel'][0] || {};
-        const requiredCols = ['Parcel_ID'];
-        const missingCols = requiredCols.filter(col => !(col in firstRow));
-        if (missingCols.length > 0) {
+        const cols = Object.keys(firstRow).map(k => k.toLowerCase());
+        const hasPid = cols.some(c => c === 'parcel_id' || c === 'elenco_parcel_id');
+        const hasName = cols.some(c => c === 'full_name' || c === 'destinatario' || c === 'nominativo');
+        const hasCf = cols.some(c => c === 'cf' || c === 'fiscal_code' || c === 'codice_fiscale');
+
+        const errorsList = [];
+        if (!hasPid) errorsList.push("Parcel_ID");
+        if (!hasName) errorsList.push("Full_Name");
+        if (!hasCf) errorsList.push("cf");
+
+        if (errorsList.length > 0) {
              const foundCols = Object.keys(firstRow).join(', ');
-            errors.push(`Sheet 'Final_Mailing_By_Parcel' is missing columns: ${missingCols.join(', ')}. Found: ${foundCols}`);
+            errors.push(`Sheet 'Final_Mailing_By_Parcel' is missing required columns (or aliases): ${errorsList.join(', ')}. Found: ${foundCols}`);
         }
     }
 
@@ -351,37 +407,42 @@ const mapToCsvRow = (row: any, status: string) => {
         }
     }
     
-    // Use 'Pending Owner' if status is Scouted (new leads) and we have no owner info.
-    // This prevents "Required field missing: LastName" errors in Salesforce.
-    // For other statuses (Retrieved, Contacted), we use what we have (even if empty, though ideally it shouldn't be).
+    // Logic: First Name/Last Name are prioritized in processOwnersForLand
+    let firstName = sanitize(row['Main Owner Name']);
     let lastName = sanitize(row['Main Owner Last Name']);
-    if (!lastName && status === 'Scouted') {
+    
+    // Use 'Pending Owner' if status is Scouted (new leads) and we have no owner info.
+    if (status === 'Scouted') {
+        firstName = '';
         lastName = 'Pending Owner';
-    } else if (!lastName) {
+    } else if (!lastName && status !== 'Contacted') {
         // Fallback for empty last name in other stages to avoid SF errors if it's mandatory
         // We truncate External ID just in case, though it shouldn't be long.
         lastName = `Unknown ${externalId}`.substring(0, 80);
     }
     
+    // We explicitly follow the mapping list provided:
+    // Main Owner Name (FirstName) and Main Owner Last Name (LastName) separately.
+    // "Minimum Scope Group" and "Name" (combined) are NOT in the list.
+
     return {
         "Land External ID": sanitize(externalId),
         "Lead Status": status,
         "Land Province": sanitize(provinceName),
         "Land Region": sanitize(region),
-        "Minimum Scope Group": "Pending Project Scope",
         "Municipality": sanitize(row['Municipality']),
         "Sezione": sanitize(row['Section']),
         "Foglio": sanitize(row['Sheet']),
         "Particella": sanitize(row['Parcel']),
         "Cadastral Area (Ha)": formatDecimalForCsv(row['Cadastral Area (Ha)']),
-        "Main Owner Name": truncate(sanitize(row['Main Owner Name']), 40), // Standard SF limit
-        "Main Owner Last Name": truncate(lastName, 80), // Standard SF limit
+        "Main Owner Name": truncate(sanitize(firstName), 40),
+        "Main Owner Last Name": truncate(lastName, 80),
         "Email": sanitize(row['Email']),
         "Fiscal Code": sanitize(row['Fiscal Code']),
         "CP": sanitize(row['CP']),
         "Has Various Owners": hasVariousOwners,
         "Number of Owners": numberOfOwners,
-        "All Owners": truncate(sanitize(row['All Owners']), 255) // Custom field limit
+        "All Owners": truncate(sanitize(row['All Owners']), 255)
     };
 };
 
@@ -395,8 +456,9 @@ const runProcess = (inputData: any, resultsData: any, log: LogFunction, inputJso
     let raw_base = [...inputSheet];
     raw_base = raw_base.filter(row => row['Parcel_ID'] != null && row['Parcel_ID'] !== '');
 
-    // Deduplication Logic: Ensure we only process unique External IDs from the input
+    // Deduplication Logic & Ambiguity Detection
     const seenIds = new Set<string>();
+    const pidMap = new Map<string, Set<string>>(); // ParcelID -> Set<ExternalID>
     const df_base: any[] = [];
     let duplicateCount = 0;
 
@@ -406,10 +468,9 @@ const runProcess = (inputData: any, resultsData: any, log: LogFunction, inputJso
         row['Municipality'] = row['comune'];
         row['Sheet'] = String(row['foglio']).split('.')[0];
         row['Parcel'] = String(row['particella']).split('.')[0];
-        row['Cadastral Area (Ha)'] = row['Area']; // Map to correct Salesforce label key
+        row['Cadastral Area (Ha)'] = row['Area'];
         row['Section'] = row['Sezione'];
 
-        // Generate ID for deduplication check
         const provDetails = getProvinceDetails(row['Province']);
         const extId = generateExternalId(
             provDetails.code,
@@ -418,6 +479,11 @@ const runProcess = (inputData: any, resultsData: any, log: LogFunction, inputJso
             row['Sheet'],
             row['Parcel']
         );
+        
+        // Track External ID mapping for Ambiguity detection
+        const pid = String(row['Parcel_ID']);
+        if(!pidMap.has(pid)) pidMap.set(pid, new Set());
+        pidMap.get(pid)?.add(extId);
 
         if (!seenIds.has(extId)) {
             seenIds.add(extId);
@@ -427,8 +493,18 @@ const runProcess = (inputData: any, resultsData: any, log: LogFunction, inputJso
         }
     });
 
+    // Check for Ambiguous Parcel IDs (IDs mapping to multiple physical lands)
+    const ambiguousPids = new Set<string>();
+    pidMap.forEach((extIds, pid) => {
+        if(extIds.size > 1) ambiguousPids.add(pid);
+    });
+
     if (duplicateCount > 0) {
-        log(`Removed ${duplicateCount} duplicate parcel(s) based on generated External ID.`, 'info');
+        log(`Removed ${duplicateCount} duplicate parcel(s).`, 'info');
+    }
+    
+    if (ambiguousPids.size > 0) {
+        log(`Warning: Detected ${ambiguousPids.size} Parcel_IDs associated with multiple distinct lands (Ambiguous IDs). Enabling geographic filtering...`, 'info');
     }
     
     // --- GENERATE CARGA 1 ---
@@ -440,222 +516,273 @@ const runProcess = (inputData: any, resultsData: any, log: LogFunction, inputJso
         return newRow;
     });
 
-    // Generate CSV version
     const csvScouted = df_base.map(row => mapToCsvRow(row, 'Scouted'));
-
     log(`-> Carga 1 generated with ${scouted.length} rows.`, 'success');
 
     // --- 2. PREPARE RETRIEVED DATA (CARGA 2) ---
     log("Preparing 'Retrieved' data (Carga 2)...");
 
-    // 2a. Create PEC map from 'All_Companies_Found'
-    log("Mapping PEC emails from company data...");
     const pec_map = new Map<string, string>();
     resultsData['All_Companies_Found']
-        .filter((row: any) => row.cf && row.pec_email && String(row.pec_email).trim() !== '')
+        .filter((row: any) => row.cf && row.pec_email)
         .forEach((row: any) => {
-            if (!pec_map.has(row.cf)) {
-                pec_map.set(row.cf, row.pec_email);
-            }
+            if (!pec_map.has(row.cf)) pec_map.set(row.cf, row.pec_email);
         });
 
-    // 2b/2c. Group owners, create simple string, and count owners
-    log("Aggregating owner data into simple string...");
-    const df_owners_clean = resultsData['Owners_Normalized'].filter((row: any) => row.Parcel_ID);
-    const owners_by_parcel_id = df_owners_clean.reduce((acc: any, row: any) => {
-        const parcelId = row.Parcel_ID;
-        if (!acc[parcelId]) {
-            acc[parcelId] = [];
-        }
-        acc[parcelId].push(row);
+    // Determine if All_Raw_Data has geographic columns for filtering
+    const rawData = resultsData['All_Raw_Data'] || [];
+    const sampleRaw = rawData[0] || {};
+    const muniColRaw = Object.keys(sampleRaw).find(k => /comune|municipality|city/i.test(k));
+    
+    // --- 2b. Smart Owner Processing ---
+    // Instead of naively grouping Owners_Normalized by Parcel_ID, we use All_Raw_Data to find WHICH owners match the land's municipality
+    
+    // Group All_Raw_Data by Parcel_ID
+    const raw_by_pid = rawData.reduce((acc: any, row: any) => {
+        const pid = row.Parcel_ID;
+        if (!acc[pid]) acc[pid] = [];
+        acc[pid].push(row);
         return acc;
     }, {});
 
-    const df_owners_grouped = new Map<string, any>();
-    for (const parcelId in owners_by_parcel_id) {
-        const group = owners_by_parcel_id[parcelId];
-        const processed_owners = new Set<string>();
-        const maxLength = 3000; // Keep high for Excel viewing, truncated only in CSV
-        let current_string = "";
+    // Group Owners_Normalized by Parcel_ID
+    const df_owners_clean = resultsData['Owners_Normalized'].filter((row: any) => row.Parcel_ID);
+    const owners_norm_by_pid = df_owners_clean.reduce((acc: any, row: any) => {
+        const pid = row.Parcel_ID;
+        if (!acc[pid]) acc[pid] = [];
+        acc[pid].push(row);
+        return acc;
+    }, {});
+    
+    log("Resolving owner data with ambiguity checks, Corporate Priority, and Over-Ownership resolution...");
 
-        for (const row of group) {
-            const owner_name_cleaned = cleanOwnerName(String(row.owner_name || ''));
-            const owner_cf_cleaned = String(row.owner_cf || '').trim();
-            const quota_cleaned = String(row.quota || '').trim();
-            
-            const owner_key = `${owner_name_cleaned}|${owner_cf_cleaned}|${quota_cleaned}`;
+    let corporatePriorityCount = 0;
+    let overOwnershipResolvedCount = 0;
+    let dataConflictCount = 0;
 
-            if ((owner_name_cleaned || owner_cf_cleaned) && !processed_owners.has(owner_key)) {
-                const name_part = owner_name_cleaned || "";
-                const cf_part = owner_cf_cleaned || "N/A";
-                const quota_part = quota_cleaned || "N/A";
+    const processOwnersForLand = (landRow: any) => {
+        const pid = landRow.Parcel_ID;
+        const muni = landRow.Municipality;
+        
+        let validFiscalCodes = new Set<string>();
+        let mainOwnerRow: any = null;
+        let cpValue = '';
 
-                const owner_str = `${name_part} [${cf_part}, ${quota_part}]`;
-                
-                // Check length before adding
-                const separator = current_string ? ", " : "";
-                if (current_string.length + separator.length + owner_str.length > maxLength) {
-                     if (!current_string.endsWith("...")) {
-                        current_string += ", ...";
-                    }
-                    break;
-                }
-
-                current_string += separator + owner_str;
-                processed_owners.add(owner_key);
-            }
+        const rawRows = raw_by_pid[pid] || [];
+        
+        // Step 1: Filter Raw Data to find matching owners (Geographic Filter)
+        let filteredRaw = rawRows;
+        
+        // If ID is ambiguous and we have muni column, MUST filter.
+        // Even if ID not ambiguous, filtering is safer if column exists.
+        if (muniColRaw && (ambiguousPids.has(String(pid)) || rawRows.length > 0)) {
+             filteredRaw = rawRows.filter((r: any) => {
+                const rMuni = normalizeMuni(r[muniColRaw]);
+                // Simple check: matches fully OR implies inclusion (e.g. "Comune di X" matches "X")
+                return rMuni === normalizeMuni(muni) || rMuni.includes(normalizeMuni(muni));
+             });
+             // If aggressive filtering removed everyone (mismatch in naming), fall back to all rows ONLY if ID is NOT ambiguous
+             if (filteredRaw.length === 0 && !ambiguousPids.has(String(pid))) {
+                 filteredRaw = rawRows;
+             }
         }
         
-        df_owners_grouped.set(parcelId, {
-            'All Owners': current_string,
-            'Number of Owners': processed_owners.size,
+        // --- STEP 1b: Corporate Priority Rule ---
+        // Check if any owner in the filtered list is a Company (CF starts with digit)
+        const hasCompany = filteredRaw.some((r: any) => {
+            const cf = String(r.cf_owner || '').trim();
+            return cf.length > 0 && /^\d/.test(cf);
         });
-    }
 
-    // 2d. Prepare Main Owner from 'All_Raw_Data'
-    log("Selecting main owner for each parcel...");
-    const df_main_owner = [];
-    const seen_parcel_ids = new Set();
-    for(const row of resultsData['All_Raw_Data']) {
-        if(row.Parcel_ID && !seen_parcel_ids.has(row.Parcel_ID)) {
-            df_main_owner.push(row);
-            seen_parcel_ids.add(row.Parcel_ID);
+        if (hasCompany) {
+            const originalCount = filteredRaw.length;
+            filteredRaw = filteredRaw.filter((r: any) => {
+                const cf = String(r.cf_owner || '').trim();
+                // Keep if it looks like a company (starts with digit)
+                return /^\d/.test(cf);
+            });
+            
+            if (filteredRaw.length < originalCount) {
+                 corporatePriorityCount++; // Track that we modified this parcel
+            }
         }
-    }
-    
-    // Apply [COMPANY] logic
-    df_main_owner.forEach((row: any) => {
-        const cf = String(row.cf_owner || '').trim();
-        const denominazione = cleanOwnerName(row.denominazione_owner);
-        const nome = cleanOwnerName(row.nome);
-        const cognome = cleanOwnerName(row.cognome);
+        // -----------------------------------------
 
-        let main_name = "";
-        let main_last_name = "";
+        // Collect Valid CFs and CP from valid rows
+        filteredRaw.forEach((r: any) => {
+            if(r.cf_owner) validFiscalCodes.add(r.cf_owner);
+            if(r.CP) cpValue = r.CP;
+        });
 
-        if (cf && /^\d/.test(cf)) { // Starts with a digit
-            main_name = '[COMPANY]';
-            main_last_name = denominazione || cognome;
-        } else {
-            if (nome || cognome) {
-                main_name = nome;
-                main_last_name = cognome;
-            } else if (denominazione) {
-                main_name = denominazione;
-                main_last_name = "";
+        // Step 2: Determine Main Owner from Filtered Raw Rows
+        if (filteredRaw.length > 0) {
+            mainOwnerRow = filteredRaw[0];
+        }
+
+        // Step 3: Filter Normalized Owners using Valid Fiscal Codes
+        const normRows = owners_norm_by_pid[pid] || [];
+        let relevantNormRows = normRows.filter((r: any) => validFiscalCodes.has(r.owner_cf));
+        
+        // Step 4: Determine Main Owner from Normalized Data (Highest Quota)
+        let maxQuota = -1;
+        let mainOwnerNorm: any = null;
+        
+        relevantNormRows.forEach((r: any) => {
+            const q = parseQuota(r.quota);
+            if (q > maxQuota) {
+                maxQuota = q;
+                mainOwnerNorm = r;
+            }
+        });
+
+        // Construct result for this parcel
+        // We augment the original landRow with owner info
+        const resultRow = { ...landRow };
+        let finalFirstName = '';
+        let finalLastName = '';
+        
+        if (mainOwnerNorm) {
+            // Priority: Normalized Data
+            
+            // Try to find email
+            if (pec_map.has(mainOwnerNorm.owner_cf)) {
+                resultRow['Email'] = pec_map.get(mainOwnerNorm.owner_cf);
+            }
+            resultRow['Fiscal Code'] = mainOwnerNorm.owner_cf;
+
+            // Try to find specific raw record for this normalized owner to get Split Names (Nome/Cognome)
+            const matchingRaw = filteredRaw.find((r: any) => r.cf_owner === mainOwnerNorm.owner_cf);
+            
+            if (matchingRaw && matchingRaw.nome && matchingRaw.cognome) {
+                // If we have distinct First/Last name in raw data, use them.
+                finalFirstName = matchingRaw.nome;
+                finalLastName = matchingRaw.cognome;
+            } else {
+                // If we only have the Full Name string from normalized data
+                // We map Full Name to Last Name (to avoid duplication in Salesforce Name field)
+                // and leave First Name empty.
+                finalLastName = cleanOwnerName(mainOwnerNorm.owner_name);
+                finalFirstName = ''; 
+            }
+
+        } else if (mainOwnerRow) {
+            // Fallback: Raw Data
+            resultRow['Fiscal Code'] = mainOwnerRow.cf_owner;
+             if (pec_map.has(mainOwnerRow.cf_owner)) {
+                resultRow['Email'] = pec_map.get(mainOwnerRow.cf_owner);
+            }
+
+            if (mainOwnerRow.nome && mainOwnerRow.cognome) {
+                 finalFirstName = mainOwnerRow.nome;
+                 finalLastName = mainOwnerRow.cognome;
+            } else {
+                 // Only have denominazione or composite
+                 const name = mainOwnerRow.denominazione_owner || mainOwnerRow.owner_name || '';
+                 finalLastName = cleanOwnerName(name);
+                 finalFirstName = '';
             }
         }
         
-        row['Main Owner Name'] = main_name;
-        row['Main Owner Last Name'] = main_last_name;
-        row['Fiscal Code'] = cf;
-
-        const isCompany = String(row.Tipo_Proprietario || '').toUpperCase().trim();
-        if (isCompany === 'AZIENDA' || isCompany === 'COMPANY') {
-            row['Email'] = pec_map.get(cf) || '';
-        } else {
-            row['Email'] = '';
-        }
-    });
-    
-    // 2f. Join everything for Carga 2
-    log("Joining all data sources for Carga 2...");
-    const df_raw_cp_map = new Map();
-     resultsData['All_Raw_Data'].forEach((row:any) => {
-        if (row.Parcel_ID && !df_raw_cp_map.has(row.Parcel_ID) && row.CP) {
-            df_raw_cp_map.set(row.Parcel_ID, row.CP);
-        }
-    });
-
-    const main_owner_map = new Map(df_main_owner.map(row => [row.Parcel_ID, row]));
-    
-    let df_carga_2 = df_base.map(base_row => {
-        const main_owner_data = main_owner_map.get(base_row.Parcel_ID) || {};
-        const owners_grouped_data = df_owners_grouped.get(base_row.Parcel_ID) || {};
+        resultRow['Main Owner Name'] = finalFirstName;
+        resultRow['Main Owner Last Name'] = finalLastName;
         
-        return {
-            ...base_row,
-            'CP': df_raw_cp_map.get(base_row.Parcel_ID) || base_row.CP, // Use raw data CP if available
-            'Main Owner Name': main_owner_data['Main Owner Name'] || '',
-            'Main Owner Last Name': main_owner_data['Main Owner Last Name'] || '',
-            'Fiscal Code': main_owner_data['Fiscal Code'] || '',
-            'Email': main_owner_data['Email'] || '',
-            'Number of Owners': owners_grouped_data['Number of Owners'] || 0,
-            'All Owners': owners_grouped_data['All Owners'] || '',
-        };
-    });
+        resultRow['Number of Owners'] = relevantNormRows.length > 0 ? relevantNormRows.length : filteredRaw.length;
+        
+        // Generate All Owners String: Name [CF, Quota], ...
+        if (relevantNormRows.length > 0) {
+            resultRow['All Owners'] = relevantNormRows.map((r: any) => {
+                const name = cleanOwnerName(r.owner_name);
+                const cf = r.owner_cf || '';
+                const q = r.quota || '';
+                const extras = [cf, q].filter(Boolean).join(', ');
+                return extras ? `${name} [${extras}]` : name;
+            }).join(', ');
+        } else {
+             resultRow['All Owners'] = filteredRaw.map((r: any) => {
+                 const name = cleanOwnerName(r.denominazione_owner || `${r.nome || ''} ${r.cognome || ''}`);
+                 const cf = r.cf_owner || '';
+                 const extras = [cf].filter(Boolean).join(', ');
+                 return extras ? `${name} [${extras}]` : name;
+             }).join(', ');
+        }
+
+        resultRow['CP'] = cpValue;
+        
+        return resultRow;
+    };
+
+    // Calculate owner data for all parcels (needed for both Retrieved and Contacted)
+    const retrievedRaw = df_base.map(row => processOwnersForLand(row));
     
-    // Filter rows that have owner data
-    const df_carga_2_filtered = df_carga_2.filter(row => row['Fiscal Code'] && row['Fiscal Code'] !== '');
-    
-    // --- GENERATE CARGA 2 ---
-    const carga2_cols = [
-        'Province', 'Municipality', 'Section', 'Sheet', 'Parcel', 
-        'Cadastral Area (Ha)', 'CP', 'Main Owner Name', 'Main Owner Last Name', 
-        'Fiscal Code', 'Email', 'Number of Owners', 'All Owners'
-    ];
+    if (corporatePriorityCount > 0) log(`Applied Corporate Priority to ${corporatePriorityCount} parcels.`, 'info');
 
-    const retrieved = df_carga_2_filtered.map(row => {
-        const newRow: {[key: string]: any} = {};
-        carga2_cols.forEach(col => newRow[col] = row[col] ?? ''); // Use ?? to handle 0 for Number of Owners
-        return newRow;
+    // --- GENERATE CSVs ---
+    // Remove "Minimum Scope Group" from mapping if it exists (it was requested to be removed).
+    
+    // Filter retrievedRaw to only those where owner information was actually retrieved
+    const retrieved = retrievedRaw.filter(row => {
+        const n = row['Number of Owners'];
+        return n !== undefined && n !== null && Number(n) > 0;
     });
 
-    // Generate CSV version
-    const csvRetrieved = df_carga_2_filtered.map(row => mapToCsvRow(row, 'Retrieved'));
-
+    const csvRetrieved = retrieved.map(row => mapToCsvRow(row, 'Retrieved'));
     log(`-> Carga 2 generated with ${retrieved.length} rows.`, 'success');
 
     // --- 3. PREPARE CONTACTED DATA (CARGA 3) ---
+    // Filter Carga 2 for those in Final_Mailing_By_Parcel
     log("Preparing 'Contacted' data (Carga 3)...");
-    const contacted_ids = new Set(resultsData['Final_Mailing_By_Parcel'].map((row: any) => row.Parcel_ID));
     
-    const df_carga_3 = df_carga_2_filtered.filter(row => contacted_ids.has(row.Parcel_ID));
-
-    // --- GENERATE CARGA 3 ---
-    const contacted = df_carga_3.map(row => {
-         const newRow: {[key: string]: any} = {};
-        carga2_cols.forEach(col => newRow[col] = row[col] ?? '');
-        return newRow;
+    const mailingList = resultsData['Final_Mailing_By_Parcel'] || [];
+    // Create set of external IDs or Parcel IDs to match
+    // The requirement says match by Parcel_ID
+    const mailingPids = new Set<string>();
+    mailingList.forEach((r: any) => {
+        if (r.Parcel_ID) mailingPids.add(String(r.Parcel_ID));
     });
 
-    // Generate CSV version
-    const csvContacted = df_carga_3.map(row => mapToCsvRow(row, 'Contacted'));
-
+    // Use retrievedRaw to filter for Contacted to ensure we capture all parcels in the mailing list,
+    // regardless of whether the owner search logic in step 2 yielded > 0 owners (though usually they should overlap).
+    // This maintains consistency with previous behavior for Carga 3 which the user noted was correct.
+    const contacted = retrievedRaw.filter(row => mailingPids.has(String(row.Parcel_ID)));
+    const csvContacted = contacted.map(row => mapToCsvRow(row, 'Contacted'));
+    
     log(`-> Carga 3 generated with ${contacted.length} rows.`, 'success');
 
-    return { scouted, retrieved, contacted, csvScouted, csvRetrieved, csvContacted };
+    return {
+        scouted,
+        retrieved,
+        contacted,
+        csvScouted,
+        csvRetrieved,
+        csvContacted
+    };
 };
 
-// --- Main Exported Function ---
-
-export async function transformData(
-    mode: 'input' | 'results' | 'process',
-    file: File | null,
+export const transformData = async (
+    type: 'input' | 'results' | 'process', 
+    file: File | null, 
     log: LogFunction,
     inputJson?: any,
     resultsJson?: any
-): Promise<{ jsonData?: any, validation?: ValidationResult, output?: OutputData }> {
-    if (mode === 'process') {
-        if (!inputJson || !resultsJson) {
-            throw new Error("Process mode requires both input and results data.");
-        }
+): Promise<{ jsonData?: any, validation?: any, output?: OutputData }> => {
+    
+    if (type === 'process') {
+        if (!inputJson || !resultsJson) throw new Error("Missing data for processing");
         const output = runProcess(inputJson, resultsJson, log);
         return { output };
     }
 
-    if (!file) {
-        throw new Error("File must be provided for validation.");
-    }
-
+    if (!file) throw new Error("No file provided");
+    
+    log(`Reading ${file.name}...`);
     const jsonData = await readFileSheets(file);
-    let validation: ValidationResult;
-
-    if (mode === 'input') {
+    
+    let validation: ValidationResult = { isValid: true, errors: [] };
+    if (type === 'input') {
         validation = validateInputFile(jsonData);
-    } else { // mode === 'results'
+    } else {
         validation = validateResultsFile(jsonData);
     }
 
     return { jsonData, validation };
-}
+};
